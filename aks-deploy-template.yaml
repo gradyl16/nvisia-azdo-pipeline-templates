@@ -1,0 +1,67 @@
+parameters:
+- name: dockerRepo
+  type: string
+- name: kubernetesServiceConnection
+  type: string
+- name: kustomizationPath
+  type: string
+  default: _deploy/kustomize/overlays/dev
+- name: namespace
+  type: string
+  default: develop
+- name: performSecretTasks
+  type: boolean
+  default: false
+- name: azureSubscription
+  type: string
+  default: ''
+- name: KeyVaultName
+  type: string
+  default: ''
+
+jobs:
+- job: DeployToAKS
+  displayName: Kustomize Bake and Deploy to AKS
+  variables:
+    imgPath: nvisia/${{ parameters.dockerRepo }}:$(Build.BuildId)
+  steps:
+  - checkout: self
+  - task: AzureKeyVault@2
+    condition: eq(${{ parameters.performSecretTasks }}, true)
+    displayName: Retrieve Secrets
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      KeyVaultName: ${{ parameters.KeyVaultName }}
+      SecretsFilter: mssql-db-admin-pswd
+  - task: Kubernetes@1
+    condition: eq(${{ parameters.performSecretTasks }}, true)
+    displayName: Inject Secrets
+    inputs:
+      connectionType: Kubernetes Service Connection
+      kubernetesServiceEndpoint: ${{ parameters.kubernetesServiceConnection }}
+      namespace: ${{ parameters.namespace }}
+      secretType: generic
+      secretArguments: --type=string --from-literal=ConnectionStrings__DefaultConnection= --from-literal sa_password=$(mssql-db-admin-pswd)
+      secretName: mssql-profile-db-secret
+  - task: KubectlInstaller@0
+    displayName: Install Kubectl
+    inputs:
+      kubectlVersion: latest
+  - task: KubernetesManifest@1
+    name: bake
+    displayName: Bake Kubernetes Manifest
+    inputs:
+      action: bake
+      namespace: ${{ parameters.namespace }}
+      renderType: kustomize
+      kustomizationPath: $(System.DefaultWorkingDirectory)/${{ parameters.kustomizationPath }}
+  - task: KubernetesManifest@1
+    name: deploy
+    displayName: Deploy to AKS
+    inputs:
+      action: deploy
+      namespace: ${{ parameters.namespace }}
+      containers: $(imgPath)
+      manifests: $(bake.manifestsBundle)
+      connectionType: kubernetesServiceConnection
+      kubernetesServiceConnection: ${{ parameters.kubernetesServiceConnection }}

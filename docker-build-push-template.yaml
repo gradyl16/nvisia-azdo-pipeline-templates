@@ -1,0 +1,30 @@
+parameters:
+- name: dockerRepo
+  type: string
+
+jobs:
+- job: BuildAndPushDockerImage
+  displayName: Build and Push Docker Image
+  steps:
+    - task: Bash@3
+      displayName: Wait For Agent
+      inputs:
+        workingDirectory: $(Agent.BuildDirectory)
+        targetType: inline
+        script: |
+          while [ $(which docker | grep -v "not found" | wc -l) != '1' ]; do
+            which docker
+            echo "init not completed, waiting ..."
+            sleep 2
+          sleep 13
+          echo "init completed, continuing ..."
+          done
+    - task: Docker@2
+      displayName: Build and Push Docker Image
+      inputs:
+        command: buildAndPush
+        repository: nvisia/${{ parameters.dockerRepo }}
+        dockerfile: $(System.DefaultWorkingDirectory)/Dockerfile
+        tags: $(Build.BuildId)
+        containerRegistry: docker-build-push
+        
